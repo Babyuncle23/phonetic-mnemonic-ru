@@ -69,26 +69,25 @@
 <script>
 let dictionary = [];
 
-// Venäjän foneettiset ryhmät (huomioi vokaalien samankaltaisuuden ja soinnilliset/soinnittomat parit)
+// Улучшенные фонетические группы
 const groups = [
-    ['а', 'о'], ['и', 'е', 'э', 'ы'], ['у', 'ю'], ['ё', 'о'],
+    ['а', 'о', 'я'], 
+    ['и', 'е', 'э', 'ы', 'ё'], 
+    ['у', 'ю'], 
     ['б', 'п'], ['в', 'ф'], ['г', 'к', 'х'], ['д', 'т'], ['ж', 'ш', 'щ', 'ч'], ['з', 'с']
 ];
 
 function normalize(word) {
     if (!word) return "";
     let w = word.toLowerCase().trim();
-    
-    // Poistetaan merkit, joilla ei ole äännearvoa (ь, ъ)
     w = w.replace(/[ьъ]/g, '');
-    
-    // Kaksoiskonsonanttien poisto
     w = w.replace(/(.)\1+/g, '$1'); 
     
-    // Foneettinen ryhmittely
     groups.forEach(group => {
         const main = group;
-        group.slice(1).forEach(char => { w = w.split(char).join(main); });
+        group.slice(1).forEach(char => {
+            w = w.split(char).join(main);
+        });
     });
     return w;
 }
@@ -107,56 +106,63 @@ function getLevenshteinDistance(a, b) {
 
 async function init() {
     try {
-        // Oletetaan että venäjänkielinen sanasto on tiedostossa slova.txt
+        // Замените URL на ваш файл словаря
         const response = await fetch('10000-russian-words-cyrillic-only.txt');
         const text = await response.text();
         
         dictionary = text.split('\n')
             .map(word => word.trim())
-            .filter(word => word.length > 1)
+            .filter(word => word.length >= 2) // Игнорируем союзы/предлоги из 1 буквы
             .map(word => ({
                 original: word,
                 norm: normalize(word)
             }));
-            
-        console.log('Словарь загружен!');
+        console.log('Словарь готов');
     } catch (error) {
-        console.error('Ошибка загрузки словаря:', error);
+        console.error('Ошибка словаря:', error);
     }
 }
 
-init();
-
 function getMatches(syllable, dict) {
-    const s = syllable.trim();
-    if (!s || dict.length === 0) return [];
+    const s = syllable.trim().toLowerCase();
+    if (!s) return [];
     
-    const sLower = s.toLowerCase();
     const normSyl = normalize(s);
     
     return dict
         .map(item => {
             let score = 0;
-            const normWord = item.norm;
-            const origWord = item.original.toLowerCase();
+            const orig = item.original.toLowerCase();
+            const norm = item.norm;
 
-            if (origWord.startsWith(sLower)) score += 50000;
-            if (normWord === normSyl) score += 20000;
-            else if (normWord.startsWith(normSyl)) score += 10000;
+            // 1. Фонетическое совпадение
+            if (norm === normSyl) score += 40000;
+            else if (norm.startsWith(normSyl)) score += 20000;
 
-            if (Math.abs(normWord.length - normSyl.length) <= 2) {
-                const dist = getLevenshteinDistance(normSyl, normWord);
-                score += (10 - dist) * 600;
+            // 2. Прямое совпадение букв (бонус только если слог > 2 букв)
+            if (orig.startsWith(s)) {
+                score += (s.length > 2) ? 15000 : 5000;
             }
 
-            score -= Math.abs(normWord.length - normSyl.length) * 100;
+            // 3. Близость по Левенштейну
+            const dist = getLevenshteinDistance(normSyl, norm);
+            score += (10 - dist) * 1500;
+
+            // 4. ЖЕСТКИЙ ШТРАФ за слишком короткие слова (чтобы не было "мо", "тэ")
+            if (orig.length <= 2) score -= 30000;
+
+            // 5. Бонус за удобную длину (4-6 букв)
+            if (orig.length >= 4 && orig.length <= 6) score += 5000;
+
             return { word: item.original, score };
         })
-        .filter(item => item.score > 0)
+        // Исключаем слово, если оно совпадает с вводом
+        .filter(item => item.score > 0 && item.word.toLowerCase() !== s)
         .sort((a, b) => b.score - a.score)
-        .slice(0, 15);
+        .slice(0, 20);
 }
 
+// Привязка событий
 const inputField = document.getElementById('word-input');
 const selects = [
     document.getElementById('select-1'), 
@@ -198,6 +204,8 @@ document.querySelectorAll('.random-btn').forEach((btn, i) => {
         }
     });
 });
+
+init();
 </script>
 </body>
 </html>
