@@ -124,42 +124,54 @@ async function init() {
 }
 
 function getMatches(syllable, dict) {
-    const s = syllable.trim().toLowerCase();
+    let s = syllable.trim().toLowerCase();
     if (!s) return [];
     
-    const normSyl = normalize(s);
+    // СПЕЦ-ПРАВИЛО: заменяем 'тэ' на 'те' для поиска, так как в русском 
+    // почти нет обычных слов на 'тэ', кроме имен и заимствований.
+    let searchSyllable = s;
+    if (s.startsWith('тэ')) {
+        searchSyllable = 'те' + s.slice(2);
+    }
     
+    const normSyl = normalize(searchSyllable);
+    const sLower = searchSyllable;
+
     return dict
         .map(item => {
             let score = 0;
             const orig = item.original.toLowerCase();
             const norm = item.norm;
 
-            // 1. Фонетическое совпадение
-            if (norm === normSyl) score += 40000;
-            else if (norm.startsWith(normSyl)) score += 20000;
-
-            // 2. Прямое совпадение букв (бонус только если слог > 2 букв)
-            if (orig.startsWith(s)) {
-                score += (s.length > 2) ? 15000 : 5000;
+            // 1. Прямое совпадение с учетом нашей замены (тэ -> те)
+            if (orig.startsWith(sLower)) {
+                score += 50000;
             }
 
-            // 3. Близость по Левенштейну
+            // 2. Фонетическое совпадение
+            if (norm === normSyl) score += 30000;
+            else if (norm.startsWith(normSyl)) score += 15000;
+
+            // 3. Штраф за слишком короткие слова из словаря (тэ, мэ, па)
+            if (orig.length <= 2) score -= 60000;
+
+            // 4. Штраф за имена и специфические слова (если они есть в словаре)
+            // Имена часто начинаются с большой буквы в исходных списках
+            if (item.original[0] === item.original[0].toUpperCase()) score -= 10000;
+
+            // 5. Бонус за популярные "визуальные" слова (4-7 букв)
+            if (orig.length >= 3 && orig.length <= 7) score += 5000;
+
+            // 6. Расстояние Левенштейна
             const dist = getLevenshteinDistance(normSyl, norm);
-            score += (10 - dist) * 1500;
-
-            // 4. ЖЕСТКИЙ ШТРАФ за слишком короткие слова (чтобы не было "мо", "тэ")
-            if (orig.length <= 2) score -= 30000;
-
-            // 5. Бонус за удобную длину (4-6 букв)
-            if (orig.length >= 4 && orig.length <= 6) score += 5000;
+            score += (10 - dist) * 1000;
 
             return { word: item.original, score };
         })
-        // Исключаем слово, если оно совпадает с вводом
+        // Убираем само введенное слово и совсем низкие результаты
         .filter(item => item.score > 0 && item.word.toLowerCase() !== s)
         .sort((a, b) => b.score - a.score)
-        .slice(0, 20);
+        .slice(0, 15);
 }
 
 // Привязка событий
