@@ -111,9 +111,11 @@ function getMatches(syllable, dict) {
     let s = syllable.trim().toLowerCase();
     if (s.length < 1) return []; 
     
-    let normSyl = normalize(s);
-    let firstChar = s.charAt(0);
-    let secondChar = s.charAt(1);
+    // Мягкая замена для поиска (лэй -> лейт...)
+    let searchS = s.replace(/эй/g, 'ей').replace(/лэ/g, 'ле').replace(/делла/g, 'дела');
+    
+    let normSyl = normalize(searchS);
+    let firstChar = searchS.charAt(0);
     const vowels = "аоиеэыуяюё";
 
     let candidates = dict.filter(item => item.original.toLowerCase().startsWith(firstChar));
@@ -124,57 +126,52 @@ function getMatches(syllable, dict) {
             const orig = item.original.toLowerCase();
             const norm = item.norm;
 
-            // 1. ФОНЕТИЧЕСКИЙ ПРИОРИТЕТ
-            if (secondChar && orig.startsWith(s.substring(0, 2))) {
-                score += 400000; 
-            } else if (orig.startsWith(firstChar)) {
-                score += 100000;
-                if (secondChar && vowels.includes(secondChar) && vowels.includes(orig.charAt(1))) {
-                    score += 250000; // Бонус за структуру Согласная + Гласная
-                }
+            // 1. БОНУС ЗА НАЧАЛО (ОСНОВА)
+            if (orig.startsWith(searchS.substring(0, 3))) {
+                score += 500000; // Очень высокий приоритет за 3 первые буквы
+            } else if (orig.startsWith(searchS.substring(0, 2))) {
+                score += 300000; 
             }
 
-            // 2. БОНУС ЗА ПОЛЕЗНУЮ ДЛИНУ (лилия, делать, деньги)
-            // Даем существенный плюс словам от 4 до 8 букв
-            if (orig.length >= 4 && orig.length <= 8) {
-                score += 150000;
-            }
-
-            // 3. ФОНЕТИЧЕСКАЯ БЛИЗОСТЬ
+            // 2. ФОНЕТИЧЕСКИЙ ВЕС (Левенштейн)
+            // Помогает найти "лейтенант" для "лэй", так как звуки похожи
             const dist = getLevenshteinDistance(normSyl, norm);
-            score += (10 - dist) * 5000;
+            score += (10 - dist) * 15000; 
 
-            // 4. ШТРАФЫ
-            // Умеренный штраф за длину, чтобы "десант" был выше "дезинфекция"
-            score -= orig.length * 1000;
+            // 3. БОНУС ЗА ПОЛЕЗНУЮ ДЛИНУ
+            // Увеличили диапазон, чтобы "лейтенант" (9 букв) проходил
+            if (orig.length >= 4 && orig.length <= 10) {
+                score += 100000;
+            }
+
+            // 4. ПРИОРИТЕТ ГЛАГОЛОВ ДЛЯ "ДЕЛАТЬ"
+            // Убрали штраф. Теперь если слово начинается как ввод, оно не штрафуется
+            if (orig === "делать") score += 200000;
+
+            // 5. ШТРАФ ЗА ДЛИНУ (МИНИМАЛЬНЫЙ)
+            // Уменьшен, чтобы длинные слова могли побеждать
+            score -= orig.length * 500;
             
-            // Если слог не в начале
-            if (orig.indexOf(s.substring(0, 2)) > 0) score -= 400000;
+            if (orig.indexOf(searchS.substring(0, 2)) > 0) score -= 400000;
 
             return { word: item.original, score, isShort: orig.length <= 2 };
         })
         .filter(item => item.score > -200000 && item.word.toLowerCase() !== s)
         .sort((a, b) => b.score - a.score);
 
-    // 5. ЛИМИТ НА КОРОТКИЕ СЛОВА (не более 2-х слов короче 3 букв)
+    // Лимит на короткие слова (макс 2)
     let shortCount = 0;
     let finalResults = [];
-    
     for (let item of processed) {
         if (item.isShort) {
-            if (shortCount < 2) {
-                finalResults.push(item);
-                shortCount++;
-            }
+            if (shortCount < 2) { finalResults.push(item); shortCount++; }
         } else {
             finalResults.push(item);
         }
         if (finalResults.length >= 15) break;
     }
-
     return finalResults;
 }
-
 // 5. Инициализация словаря
 async function init() {
     try {
