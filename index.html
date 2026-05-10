@@ -116,14 +116,8 @@ function getMatches(syllable, dict) {
     let secondChar = s.charAt(1);
     const vowels = "аоиеэыуяюё";
 
-    // 1. Быстрая фильтрация по первой букве
+    // 1. Фильтрация по первой букве
     let candidates = dict.filter(item => item.original.toLowerCase().startsWith(firstChar));
-
-    // Если на эту букву ничего нет, ищем по нормализованной первой букве
-    if (candidates.length === 0) {
-        let normFirst = normalize(firstChar);
-        candidates = dict.filter(item => item.norm.startsWith(normFirst));
-    }
 
     return candidates
         .map(item => {
@@ -131,50 +125,44 @@ function getMatches(syllable, dict) {
             const orig = item.original.toLowerCase();
             const norm = item.norm;
 
-            // --- ПРИОРИТЕТ ПЕРВЫХ БУКВ ---
+            // --- ФОНЕТИКА (ГЛАВНЫЙ ПРИОРИТЕТ) ---
             
-            // 1. Идеальное совпадение первых двух букв (напр. "ла" -> "лак")
+            // Прямое совпадение первых букв (напр. "лэ" -> "ле", "ли")
             if (secondChar && orig.startsWith(s.substring(0, 2))) {
-                score += 500000; 
-            } 
-            // 2. Совпадение первой буквы + совпадение ТИПА второй буквы (гласная к гласной)
-            else if (orig.startsWith(firstChar)) {
-                score += 100000; 
+                score += 400000; 
+            } else if (orig.startsWith(firstChar)) {
+                score += 100000;
+                // Бонус за "согласная + любая гласная"
                 if (secondChar && vowels.includes(secondChar) && vowels.includes(orig.charAt(1))) {
-                    score += 250000; // Помогает "лэ" найти "ли", "ле", "лю"
+                    score += 150000;
                 }
             }
 
-            // --- КОРРЕКЦИЯ ДЛИНЫ (Чтобы не было слишком коротко) ---
-            
-            // Бонус за "золотую середину" (слова из 4-7 букв лучше всего для ассоциаций)
-            if (orig.length >= 4 && orig.length <= 7) {
-                score += 150000; 
-            }
-            
-            // Небольшой штраф за очень длинные слова (сложно запомнить)
-            if (orig.length > 8) {
-                score -= (orig.length - 8) * 20000;
-            }
-
-            // Минимальный технический штраф за длину для сортировки внутри групп
-            score -= orig.length * 100;
-
-            // --- КАЧЕСТВО СЛОВА ---
-            
-            // Жесткий штраф за глаголы (неудобно визуализировать)
-            if (orig.endsWith('ть')) score -= 100000;
-
-            // Фонетическая близость (Левенштейн) - помогает вытащить "лилия" для "лэла"
+            // Насколько слово В ЦЕЛОМ похоже по звучанию (Левенштейн по нормализованным формам)
             const dist = getLevenshteinDistance(normSyl, norm);
-            score += (10 - dist) * 5000;
+            // Если слово сильно отличается по звукам, сильно минусуем
+            score += (10 - dist) * 7000;
 
-            // Штраф, если слог найден не в начале
+            // --- ДЛИНА (ВСПОМОГАТЕЛЬНЫЙ ПАРАМЕТР) ---
+            
+            // Оптимальная длина — чуть длиннее или равно вводу
+            let lengthDiff = Math.abs(orig.length - s.length);
+            score -= lengthDiff * 2000; // Умеренный штраф за лишние буквы
+
+            // Маленький бонус за существительные-предметы (обычно 3-6 букв)
+            if (orig.length >= 3 && orig.length <= 6) score += 20000;
+
+            // --- ЧИСТКА ---
+            
+            // Убираем глаголы ("лысеть") и слишком длинные прилагательные ("любимый")
+            if (orig.endsWith('ть')) score -= 100000;
+            if (orig.length > 7 && (orig.endsWith('ый') || orig.endsWith('ий'))) score -= 50000;
+
+            // Если слог не в начале - в самый низ
             if (orig.indexOf(s.substring(0, 2)) > 0) score -= 300000;
 
             return { word: item.original, score };
         })
-        // Фильтр: убираем мусор и слишком короткие совпадения с вводом
         .filter(item => item.score > -200000 && (item.word.toLowerCase() !== s || s.length > 3))
         .sort((a, b) => b.score - a.score)
         .slice(0, 15);
