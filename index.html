@@ -111,55 +111,56 @@ function getMatches(syllable, dict) {
     let s = syllable.trim().toLowerCase();
     if (s.length < 2) return []; 
     
-    // Фонетическая адаптация ввода (эй -> ей, лэ -> ле и т.д.)
     let searchS = s.replace(/эй/g, 'ей').replace(/ай/g, 'ай')
                    .replace(/лэ/g, 'ле').replace(/хэ/g, 'хе')
                    .replace(/тэ/g, 'те');
     
     let normSyl = normalize(searchS);
-    let startPart = searchS.substring(0, 2);
+    let firstChar = searchS; // Первая буква запроса
 
-    // ШАГ 1: Быстрая фильтрация (убирает тормоза)
-    // Оставляем только те слова, где есть эти буквы вообще
+    // 1. Быстрая фильтрация
     let candidates = dict.filter(item => 
-        item.original.toLowerCase().includes(startPart) || 
+        item.original.toLowerCase().includes(searchS.substring(0, 2)) || 
         item.norm.includes(normSyl.substring(0, 2))
     );
 
-    // ШАГ 2: Ранжирование
     return candidates
         .map(item => {
             let score = 0;
             const orig = item.original.toLowerCase();
             const norm = item.norm;
 
-            // ПРИОРИТЕТ 1: Совпадение в начале слова (самое важное)
+            // --- КРИТИЧЕСКИЙ ФИЛЬТР ПЕРВОЙ БУКВЫ ---
+            // Если первая буква не совпадает (как 'з' в 'запах' при запросе 'хах')
+            // мы вычитаем сразу 300 000 очков.
+            if (orig[0] !== firstChar && norm[0] !== normalize(firstChar)) {
+                score -= 300000;
+            }
+
+            // ПРИОРИТЕТ: Совпадение в начале слова
             if (orig.startsWith(searchS)) {
                 score += 200000; 
             } else if (norm.startsWith(normSyl)) {
                 score += 100000;
             } 
 
-            // ШТРАФ: Если слог найден НЕ в начале (убирает "запах" при вводе "хах")
+            // ШТРАФ: Если слог НЕ в начале (убирает "запах" окончательно)
             const index = orig.indexOf(searchS);
-            if (index > 0) score -= 100000;
+            if (index > 0) score -= 150000;
 
-            // ПРИОРИТЕТ 2: Хорошая длина для ассоциации (4-7 букв)
-            if (orig.length >= 4 && orig.length <= 7) score += 20000;
+            // ПРИОРИТЕТ: Хорошая длина (4-7 букв)
+            if (orig.length >= 4 && orig.length <= 7) score += 30000;
 
-            // ШТРАФ: Глаголы (на "ть") - ассоциации лучше из существительных
-            if (orig.endsWith('ть')) score -= 40000;
+            // ШТРАФ: Глаголы (на "ть")
+            if (orig.endsWith('ть')) score -= 50000;
 
-            // ШТРАФ: Слишком короткие слова (до 3 букв)
-            if (orig.length < 4 && orig !== searchS) score -= 30000;
-
-            // Левенштейн для точности
+            // Левенштейн
             const dist = getLevenshteinDistance(normSyl, norm);
             score += (10 - dist) * 2500;
 
             return { word: item.original, score };
         })
-        .filter(item => item.score > 0 && item.word.toLowerCase() !== s)
+        .filter(item => item.score > -200000 && item.word.toLowerCase() !== s) // Пропускаем только адекватные
         .sort((a, b) => b.score - a.score)
         .slice(0, 15);
 }
