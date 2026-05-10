@@ -163,7 +163,7 @@ function getMatches(syllable, dict) {
 
             return { word: item.original, score };
         })
-        .filter(item => item.score > -100000 && item.word.toLowerCase() !== s)
+        .filter(item => item.score > -100000 && (item.word.toLowerCase() !== s || s.length > 3
         .sort((a, b) => b.score - a.score)
         .slice(0, 15);
 }
