@@ -116,7 +116,6 @@ function getMatches(syllable, dict) {
     let secondChar = s.charAt(1);
     const vowels = "аоиеэыуяюё";
 
-    // 1. Фильтрация по первой букве
     let candidates = dict.filter(item => item.original.toLowerCase().startsWith(firstChar));
 
     return candidates
@@ -125,45 +124,50 @@ function getMatches(syllable, dict) {
             const orig = item.original.toLowerCase();
             const norm = item.norm;
 
-            // --- ФОНЕТИКА (ГЛАВНЫЙ ПРИОРИТЕТ) ---
+            // --- ПРИОРИТЕТ СОЗВУЧИЯ ---
             
-            // Прямое совпадение первых букв (напр. "лэ" -> "ле", "ли")
+            // Если первые 2 буквы совпадают или вторая буква — подходящая гласная
             if (secondChar && orig.startsWith(s.substring(0, 2))) {
-                score += 400000; 
+                score += 500000; 
             } else if (orig.startsWith(firstChar)) {
                 score += 100000;
-                // Бонус за "согласная + любая гласная"
+                // "лэ" -> "ли", "ле" и т.д.
                 if (secondChar && vowels.includes(secondChar) && vowels.includes(orig.charAt(1))) {
-                    score += 150000;
+                    score += 300000; // Повысили бонус за гласную
                 }
             }
 
-            // Насколько слово В ЦЕЛОМ похоже по звучанию (Левенштейн по нормализованным формам)
+            // БОНУС ЗА ТОЧНОЕ ПОПАДАНИЕ В КОРОТКОЕ СЛОВО
+            // Если слово из словаря — это и есть наш первый слог (напр. "ли")
+            if (orig.length === 2 && orig.startsWith(firstChar)) {
+                score += 200000; 
+            }
+
+            // Фонетическая близость
             const dist = getLevenshteinDistance(normSyl, norm);
-            // Если слово сильно отличается по звукам, сильно минусуем
             score += (10 - dist) * 7000;
 
-            // --- ДЛИНА (ВСПОМОГАТЕЛЬНЫЙ ПАРАМЕТР) ---
-            
-            // Оптимальная длина — чуть длиннее или равно вводу
+            // --- КОРРЕКЦИЯ ДЛИНЫ ---
             let lengthDiff = Math.abs(orig.length - s.length);
-            score -= lengthDiff * 2000; // Умеренный штраф за лишние буквы
-
-            // Маленький бонус за существительные-предметы (обычно 3-6 букв)
-            if (orig.length >= 3 && orig.length <= 6) score += 20000;
-
-            // --- ЧИСТКА ---
             
-            // Убираем глаголы ("лысеть") и слишком длинные прилагательные ("любимый")
-            if (orig.endsWith('ть')) score -= 100000;
-            if (orig.length > 7 && (orig.endsWith('ый') || orig.endsWith('ий'))) score -= 50000;
+            // Уменьшаем штраф за длину, если слово короткое (2-4 буквы)
+            if (orig.length <= 4) {
+                score -= lengthDiff * 500; 
+            } else {
+                score -= lengthDiff * 3000; 
+            }
 
-            // Если слог не в начале - в самый низ
-            if (orig.indexOf(s.substring(0, 2)) > 0) score -= 300000;
+            // --- ФИЛЬТРЫ ---
+            if (orig.endsWith('ть')) score -= 100000;
+            // Штрафуем длинные прилагательные, чтобы не мешали
+            if (orig.length > 6 && (orig.endsWith('ый') || orig.endsWith('ий'))) score -= 80000;
+            
+            if (orig.indexOf(s.substring(0, 2)) > 0) score -= 400000;
 
             return { word: item.original, score };
         })
-        .filter(item => item.score > -200000 && (item.word.toLowerCase() !== s || s.length > 3))
+        // Убираем фильтр s.length > 3, чтобы "ли" могло попасть в список
+        .filter(item => item.score > -200000 && item.word.toLowerCase() !== s)
         .sort((a, b) => b.score - a.score)
         .slice(0, 15);
 }
