@@ -111,59 +111,60 @@ function getMatches(syllable, dict) {
     let s = syllable.trim().toLowerCase();
     if (s.length < 1) return []; 
     
-    // Мягкая адаптация звуков
+    // 1. Адаптация звуков (эй -> ей и т.д.)
     let searchS = s.replace(/эй/g, 'ей').replace(/ай/g, 'ай')
                    .replace(/лэ/g, 'ле').replace(/хэ/g, 'хе')
                    .replace(/тэ/g, 'те');
     
     let normSyl = normalize(searchS);
-    let firstLetter = searchS.charAt(0); // Берем ПЕРВУЮ БУКВУ слога
-    let normFirstLetter = normalize(firstLetter);
+    let firstLetter = searchS.charAt(0);
+    let normFirst = normalize(firstLetter);
 
-    // 1. Быстрая фильтрация (чтобы не тормозило)
+    // 2. Быстрая фильтрация по первой букве
     let candidates = dict.filter(item => {
-        const origLower = item.original.toLowerCase();
-        return origLower.startsWith(firstLetter) || item.norm.startsWith(normFirstLetter);
+        const orig = item.original.toLowerCase();
+        return orig.startsWith(firstLetter) || item.norm.startsWith(normFirst);
     });
 
-    // Если по первой букве ничего не нашли (редкий случай), смотрим шире
-    if (candidates.length === 0) {
-        candidates = dict.filter(item => item.norm.includes(normSyl.substring(0, 1)));
-    }
+    if (candidates.length === 0) candidates = dict.slice(0, 500);
 
+    // 3. Ранжирование
     return candidates
         .map(item => {
             let score = 0;
             const orig = item.original.toLowerCase();
             const norm = item.norm;
 
-            // БОНУС 1: Совпадение начала (самое важное)
+            // БОНУС: Совпадение в начале слова (фундамент)
             if (orig.startsWith(searchS)) {
                 score += 200000; 
             } else if (norm.startsWith(normSyl)) {
                 score += 100000;
             } 
 
-            // ШТРАФ: Если слог НЕ в начале (убирает "запах" для "хах")
+            // КРИТИЧЕСКИЙ ШТРАФ: Если слог найден НЕ в начале (убирает "запах")
             const index = orig.indexOf(searchS);
             if (index > 0) score -= 150000;
 
-            // БОНУС 2: Идеальная длина (4-7 букв)
-            if (orig.length >= 4 && orig.length <= 7) score += 30000;
+            // ВЕС «КОРОТКОГО РАССТОЯНИЯ»: 
+            // Чем меньше разница в длине между вводом и словом, тем выше балл.
+            // Это поднимет "ключ" (4 буквы) выше "ключевой" (8 букв).
+            let lengthDiff = Math.abs(orig.length - s.length);
+            score -= lengthDiff * 10000; // Мощный штраф за "лишние" буквы
 
-            // ШТРАФ: Глаголы
+            // ШТРАФ ЗА АБСТРАКЦИИ: Убираем "воду" (прилагательные и глаголы)
+            if (orig.endsWith('ый') || orig.endsWith('ий') || orig.endsWith('ой')) score -= 30000;
             if (orig.endsWith('ть')) score -= 50000;
 
-            // ШТРАФ: Слишком короткие слова (до 3 букв)
-            if (orig.length < 3 && orig !== searchS) score -= 40000;
-
-            // Левенштейн для финальной подгонки
+            // Левенштейн для финальной точности
             const dist = getLevenshteinDistance(normSyl, norm);
             score += (10 - dist) * 2000;
 
             return { word: item.original, score };
         })
-        .filter(item => item.score > -100000 && (item.word.toLowerCase() !== s || s.length > 3
+        // УСЛОВИЕ: Не показываем ввод, только если это короткий слог (<= 3 букв).
+        // Если ввели "ключ", он ОСТАНЕТСЯ в списке.
+        .filter(item => item.score > -200000 && (item.word.toLowerCase() !== s || s.length > 3))
         .sort((a, b) => b.score - a.score)
         .slice(0, 15);
 }
