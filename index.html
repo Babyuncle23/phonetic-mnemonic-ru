@@ -111,59 +111,58 @@ function getMatches(syllable, dict) {
     let s = syllable.trim().toLowerCase();
     if (s.length < 1) return []; 
     
-    // 1. Адаптация звуков (эй -> ей и т.д.)
-    let searchS = s.replace(/эй/g, 'ей').replace(/ай/g, 'ай')
-                   .replace(/лэ/g, 'ле').replace(/хэ/g, 'хе')
-                   .replace(/тэ/g, 'те');
-    
-    let normSyl = normalize(searchS);
-    let firstLetter = searchS.charAt(0);
-    let normFirst = normalize(firstLetter);
+    let normSyl = normalize(s);
+    let firstChar = s.charAt(0);
+    let secondChar = s.charAt(1);
+    const vowels = "аоиеэыуяюё";
 
-    // 2. Быстрая фильтрация по первой букве
-    let candidates = dict.filter(item => {
-        const orig = item.original.toLowerCase();
-        return orig.startsWith(firstLetter) || item.norm.startsWith(normFirst);
-    });
+    // 1. Быстрая фильтрация по первой букве
+    let candidates = dict.filter(item => item.original.toLowerCase().startsWith(firstChar));
 
-    if (candidates.length === 0) candidates = dict.slice(0, 500);
+    // Если на эту букву ничего нет, ищем по нормализованной первой букве
+    if (candidates.length === 0) {
+        let normFirst = normalize(firstChar);
+        candidates = dict.filter(item => item.norm.startsWith(normFirst));
+    }
 
-    // 3. Ранжирование
     return candidates
         .map(item => {
             let score = 0;
             const orig = item.original.toLowerCase();
             const norm = item.norm;
 
-            // БОНУС: Совпадение в начале слова (фундамент)
-            if (orig.startsWith(searchS)) {
-                score += 200000; 
-            } else if (norm.startsWith(normSyl)) {
-                score += 100000;
+            // --- ПРИОРИТЕТ ПЕРВЫХ БУКВ ---
+            
+            // Если первые две буквы СОВПАЛИ ТОЧНО (напр. "та" в "такэ" и "так")
+            if (secondChar && orig.startsWith(s.substring(0, 2))) {
+                score += 500000; 
             } 
+            // Если первая совпала ТОЧНО, а вторая — любая ГЛАСНАЯ (напр. "лэ" -> "ли")
+            else if (orig.startsWith(firstChar)) {
+                score += 100000; // Базовый бонус за первую букву
+                
+                if (secondChar && vowels.includes(secondChar) && vowels.includes(orig.charAt(1))) {
+                    score += 200000; // Огромный бонус за структуру Согласная + Гласная
+                }
+            }
 
-            // КРИТИЧЕСКИЙ ШТРАФ: Если слог найден НЕ в начале (убирает "запах")
-            const index = orig.indexOf(searchS);
-            if (index > 0) score -= 150000;
+            // Дополнительный бонус за фонетическое сходство начала
+            if (norm.startsWith(normSyl)) {
+                score += 50000;
+            }
 
-            // ВЕС «КОРОТКОГО РАССТОЯНИЯ»: 
-            // Чем меньше разница в длине между вводом и словом, тем выше балл.
-            // Это поднимет "ключ" (4 буквы) выше "ключевой" (8 букв).
-            let lengthDiff = Math.abs(orig.length - s.length);
-            score -= lengthDiff * 10000; // Мощный штраф за "лишние" буквы
+            // ШТРАФ: Если слог найден не в начале (на всякий случай)
+            if (orig.indexOf(s.substring(0, 2)) > 0) score -= 300000;
 
-            // ШТРАФ ЗА АБСТРАКЦИИ: Убираем "воду" (прилагательные и глаголы)
-            if (orig.endsWith('ый') || orig.endsWith('ий') || orig.endsWith('ой')) score -= 30000;
-            if (orig.endsWith('ть')) score -= 50000;
+            // ШТРАФ ЗА АБСТРАКЦИИ (чтобы предметы были выше)
+            if (orig.endsWith('ый') || orig.endsWith('ий') || orig.endsWith('ой')) score -= 50000;
+            if (orig.endsWith('ть')) score -= 70000;
 
-            // Левенштейн для финальной точности
-            const dist = getLevenshteinDistance(normSyl, norm);
-            score += (10 - dist) * 2000;
+            // Минимальный штраф за длину, чтобы "такелаж" не забивал "так"
+            score -= orig.length * 1000;
 
             return { word: item.original, score };
         })
-        // УСЛОВИЕ: Не показываем ввод, только если это короткий слог (<= 3 букв).
-        // Если ввели "ключ", он ОСТАНЕТСЯ в списке.
         .filter(item => item.score > -200000 && (item.word.toLowerCase() !== s || s.length > 3))
         .sort((a, b) => b.score - a.score)
         .slice(0, 15);
